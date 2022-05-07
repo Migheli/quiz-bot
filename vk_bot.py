@@ -5,12 +5,12 @@ import logging
 import vk_api
 from vk_api.longpoll import VkLongPoll, VkEventType
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
-from question_set_getters import get_questions_answers_set
+from questions_compiler import get_questions_units
 from redis_db_handler import redis_db
 
 logger = logging.getLogger(__name__)
 
-questions_answers_set = get_questions_answers_set(os.getenv('QUIZ_FILE'))
+questions_answers_set = get_questions_units(os.getenv('QUIZ_FILE'))
 
 def send_keyboard(event, vk_api):
     vk_api.messages.send(

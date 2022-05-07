@@ -5,8 +5,9 @@ import logging
 from enum import Enum
 from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, ConversationHandler
-from question_set_getters import get_questions_answers_set
+from questions_compiler import get_questions_units
 from redis_db_handler import redis_db
+from functools import partial
 
 logger = logging.getLogger(__name__)
 
@@ -14,9 +15,6 @@ logger = logging.getLogger(__name__)
 class States(Enum):
     HANDLE_NEW_QUESTION_REQUEST = 0
     HANDLE_SOLUTION_ATTEMPT = 1
-
-
-questions_answers_set = get_questions_answers_set(os.getenv('QUIZ_FILE'))
 
 
 def start(bot, update):
@@ -31,10 +29,11 @@ def start(bot, update):
 
 
 def handle_new_question_request(bot, update):
-    question_text = random.choice(list(questions_answers_set.keys()))
+    questions_answers = partial(get_questions_units, filename=os.getenv('QUIZ_FILE'))
+    question, answer = random.choice(list(questions_answers().items()))
     chat_id = update.message.chat_id
-    redis_db.set(chat_id, questions_answers_set[question_text])
-    update.message.reply_text(text=question_text)
+    redis_db.set(chat_id, answer)
+    update.message.reply_text(text=question)
 
     return States.HANDLE_SOLUTION_ATTEMPT
 
@@ -59,7 +58,7 @@ def give_up(bot, update):
 
 def cancel(bot, update):
     user = update.message.from_user
-    logger.info('User %s canceled the conversation.', user.first_name)
+    logger.info(f'User {user.first_name} canceled the conversation.' )
     update.message.reply_text('До встречи! Спасибо за игру!',
                               reply_markup=ReplyKeyboardRemove())
 
