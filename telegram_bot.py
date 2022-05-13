@@ -6,8 +6,8 @@ from enum import Enum
 from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, ConversationHandler
 from questions_compiler import get_questions_units
-from redis_db_handler import redis_db
 from functools import partial
+import redis
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +28,8 @@ def start(bot, update):
     return States.HANDLE_NEW_QUESTION_REQUEST
 
 
-def handle_new_question_request(bot, update):
-    questions_answers = partial(get_questions_units, filename=os.getenv('QUIZ_FILE'))
-    question, answer = random.choice(list(questions_answers().items()))
+def handle_new_question_request(bot, update, redis_db, questions):
+    question, answer = random.choice(list(questions.items()))
     chat_id = update.message.chat_id
     redis_db.set(chat_id, answer)
     update.message.reply_text(text=question)
@@ -38,7 +37,7 @@ def handle_new_question_request(bot, update):
     return States.HANDLE_SOLUTION_ATTEMPT
 
 
-def handle_solution_attempt(bot, update):
+def handle_solution_attempt(bot, update, redis_db):
     true_answer = re.split(r'\.|\(', redis_db.get(update.message.chat_id))[0].replace('Ответ:\n', '')
     if update.message.text == true_answer:
         logger.info(redis_db.get(update.message.chat_id))
@@ -49,16 +48,16 @@ def handle_solution_attempt(bot, update):
         update.message.reply_text(text='К сожалению, ответ неверный')
 
 
-def give_up(bot, update):
+def give_up(bot, update, redis_db):
     update.message.reply_text(
         text=redis_db.get(update.message.chat_id)
     )
-    handle_new_question_request(bot, update)
+    handle_new_question_request(redis_db, bot, update)
 
 
 def cancel(bot, update):
     user = update.message.from_user
-    logger.info(f'User {user.first_name} canceled the conversation.' )
+    logger.info(f'User {user.first_name} canceled the conversation.')
     update.message.reply_text('До встречи! Спасибо за игру!',
                               reply_markup=ReplyKeyboardRemove())
 
@@ -73,26 +72,50 @@ def main():
     while True:
         try:
             logging.info('Бот в Телеграм успешно запущен')
+
+            redis_connection_pool = redis.ConnectionPool(host=os.getenv('REDIS_HOST'),
+                                                         port=os.getenv('REDIS_PORT'),
+                                                         db=os.getenv('REDIS_DB'),
+                                                         password=os.getenv('REDIS_PASSWORD'),
+                                                         decode_responses=True,
+                                                         encoding='KOI8-R'
+                                                         )
+            redis_db = redis.Redis(connection_pool=redis_connection_pool)
+            questions = get_questions_units(os.getenv('QUIZ_FILE'))
             updater = Updater(token=os.getenv('TG_BOT_TOKEN'))
             dp = updater.dispatcher
             conv_handler = ConversationHandler(
                 entry_points=[CommandHandler('start', start)],
-
                 states={
-
                     States.HANDLE_NEW_QUESTION_REQUEST: [MessageHandler(Filters.regex(r'Новый вопрос'),
-                                                                        handle_new_question_request)],
+                                                                        partial(handle_new_question_request,
+                                                                                redis_db=redis_db,
+                                                                                questions=questions
+                                                                                )
+                                                                        )
+                                                         ],
 
                     States.HANDLE_SOLUTION_ATTEMPT: [MessageHandler(Filters.regex(r'Сдаться'),
-                                                                    give_up),
+                                                                    partial(give_up,
+                                                                            redis_db=redis_db)
+                                                                    ),
+
                                                      MessageHandler(Filters.regex(r'Новый вопрос'),
-                                                                    handle_new_question_request),
+                                                                    partial(handle_new_question_request,
+                                                                            redis_db=redis_db,
+                                                                            questions=questions
+                                                                            )
+                                                                    ),
+
                                                      MessageHandler(Filters.text,
-                                                                    handle_solution_attempt)],
+                                                                    partial(handle_solution_attempt,
+                                                                            redis_db=redis_db
+                                                                            )
+                                                                    )
+                                                     ],
                 },
 
-                fallbacks=[CommandHandler('cancel', cancel)]
-            )
+                fallbacks=[CommandHandler('cancel', cancel)])
 
             dp.add_handler(conv_handler)
             updater.start_polling()
