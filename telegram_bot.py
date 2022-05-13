@@ -97,7 +97,8 @@ def main():
 
                     States.HANDLE_SOLUTION_ATTEMPT: [MessageHandler(Filters.regex(r'Сдаться'),
                                                                     partial(give_up,
-                                                                            redis_db=redis_db)
+                                                                            redis_db=redis_db
+                                                                            )
                                                                     ),
 
                                                      MessageHandler(Filters.regex(r'Новый вопрос'),
